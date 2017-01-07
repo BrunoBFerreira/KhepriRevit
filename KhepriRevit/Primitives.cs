@@ -58,34 +58,44 @@ namespace KhepriRevit
                             .OrderBy(e => e.Elevation);
         }
 
-        public ElementId CreateLevel(double elevation)
+        public Level FindLevelAtElevation(double elevation)
+        {
+            return new FilteredElementCollector(doc)
+                .WherePasses(new ElementClassFilter(typeof(Level), false))
+                .Cast<Level>().FirstOrDefault(e => e.Elevation == elevation);
+        }
+        public ElementId CreateLevelAtElevation(double elevation)
         {
             using (Transaction t = new Transaction(doc, "Creating a level"))
             {
                 t.Start();
-                Level level = new FilteredElementCollector(doc)
-                    .WherePasses(new ElementClassFilter(typeof(Level), false))
-                    .Cast<Level>().FirstOrDefault(e => e.Elevation == elevation);
-                if (level == null)
-                {
-                    level = doc.Create.NewLevel(elevation);
-                    level.Name = "Level " + levelCounter;
-                    levelCounter++;
-                    IEnumerable<ViewFamilyType> viewFamilyTypes;
-                    viewFamilyTypes = from elem in new FilteredElementCollector(doc).OfClass(typeof(ViewFamilyType))
-                                      let type = elem as ViewFamilyType
-                                      where type.ViewFamily == ViewFamily.FloorPlan
-                                      select type;
-                    ViewPlan floorView = ViewPlan.Create(doc, viewFamilyTypes.First().Id, level.Id);
-                    viewFamilyTypes = from elem in new FilteredElementCollector(doc).OfClass(typeof(ViewFamilyType))
-                                      let type = elem as ViewFamilyType
-                                      where type.ViewFamily == ViewFamily.CeilingPlan
-                                      select type;
-                    ViewPlan ceilingView = ViewPlan.Create(doc, viewFamilyTypes.First().Id, level.Id);
-                }
+                Level level = doc.Create.NewLevel(elevation);
+                level.Name = "Level " + levelCounter;
+                levelCounter++;
+                IEnumerable<ViewFamilyType> viewFamilyTypes;
+                viewFamilyTypes = from elem in new FilteredElementCollector(doc).OfClass(typeof(ViewFamilyType))
+                                  let type = elem as ViewFamilyType
+                                  where type.ViewFamily == ViewFamily.FloorPlan
+                                  select type;
+                ViewPlan floorView = ViewPlan.Create(doc, viewFamilyTypes.First().Id, level.Id);
+                viewFamilyTypes = from elem in new FilteredElementCollector(doc).OfClass(typeof(ViewFamilyType))
+                                  let type = elem as ViewFamilyType
+                                  where type.ViewFamily == ViewFamily.CeilingPlan
+                                  select type;
+                ViewPlan ceilingView = ViewPlan.Create(doc, viewFamilyTypes.First().Id, level.Id);
                 t.Commit();
                 return level.Id;
             }
+        }
+        public ElementId FindOrCreateLevelAtElevation(double elevation)
+        {
+            Level level = FindLevelAtElevation(elevation);
+            return (level == null) ? CreateLevelAtElevation(elevation) : level.Id;
+        }
+        public ElementId UpperLevel(ElementId currentLevelId, double addedElevation)
+        {
+            Level level = doc.GetElement(currentLevelId) as Level;
+            return FindOrCreateLevelAtElevation(level.Elevation + addedElevation);
         }
 
         public ElementId CreatePolygonalFloor(XYZ[] pts, ElementId levelId)
