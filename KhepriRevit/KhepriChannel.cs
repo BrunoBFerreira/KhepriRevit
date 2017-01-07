@@ -74,7 +74,7 @@ namespace KhepriRevit
         public void eByte(Exception e) { w.Write(-123); dumpException(e); }
 
         public bool rBoolean() => r.ReadByte() == 1;
-        public void wBoolean() => w.Write((byte)1);
+        public void wBoolean(bool b) => w.Write(b ? (byte)1 : (byte) 2);
         public void eBoolean(Exception e) { w.Write((byte)127); dumpException(e); }
 
         public int rInt16() => r.ReadInt16();
@@ -161,12 +161,12 @@ namespace KhepriRevit
         public ElementId[] rElementIdArray()
         {
             int length = rInt32();
-            ElementId[] objs = new ElementId[length];
+            ElementId[] ids = new ElementId[length];
             for (int i = 0; i < length; i++)
             {
-                objs[i] = rElementId();
+                ids[i] = rElementId();
             }
-            return objs;
+            return ids;
         }
         public void wElementIdArray(ElementId[] ids)
         {
@@ -176,7 +176,44 @@ namespace KhepriRevit
                 wElementId(id);
             }
         }
-        public void eElementIdArray(Exception e) { wInt32(-1); dumpException(e); }
+        public string[] rStringArray()
+        {
+            int length = rInt32();
+            string[] strs = new string[length];
+            for (int i = 0; i < length; i++)
+            {
+                strs[i] = rString();
+            }
+            return strs;
+        }
+        public void wStringArray(string[] strs)
+        {
+            wInt32(strs.Length);
+            foreach (var str in strs)
+            {
+                wString(str);
+            }
+        }
+        public void eStringArray(Exception e) { wInt32(-1); dumpException(e); }
+        public double[] rDoubleArray()
+        {
+            int length = rInt32();
+            double[] ds = new double[length];
+            for (int i = 0; i < length; i++)
+            {
+                ds[i] = rDouble();
+            }
+            return ds;
+        }
+        public void wDoubleArray(double[] ds)
+        {
+            wInt32(ds.Length);
+            foreach (var d in ds)
+            {
+                wDouble(d);
+            }
+        }
+        public void eDoubleArray(Exception e) { wInt32(-1); dumpException(e); }
         /*        
                 public Document getDoc() => Application.DocumentManager.MdiActiveDocument;
                 public Transaction getTrans(Document doc) => doc.Database.TransactionManager.StartTransaction();

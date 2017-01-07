@@ -14,6 +14,7 @@ namespace KhepriRevit
         private UIApplication uiapp;
         private Document doc;
         private int levelCounter = 3;
+        private int customFamilyCounter = 0;
 
         public Primitives(UIApplication app)
         {
@@ -98,6 +99,65 @@ namespace KhepriRevit
             return FindOrCreateLevelAtElevation(level.Elevation + addedElevation);
         }
 
+        public ElementId LoadFamily(string fileName)
+        {
+            using (Transaction t = new Transaction(doc, "Load a family"))
+            {
+                t.Start();
+                Family family = null;
+                Debug.Assert(doc.LoadFamily(fileName, out family));
+                t.Commit();
+                return family.Id;
+            }
+        }
+
+        bool FamilyElementMatches(FamilySymbol symb, string[] namesList, double[] valuesList)
+        {
+            double epsilon = 0.022;
+            for (int i = 0; i < namesList.Length; i++)
+            {
+                double valueTest = symb.get_Parameter(namesList[i]).AsDouble();
+                if (Math.Abs(valueTest - valuesList[i]) > epsilon)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+        public ElementId FamilyElement(ElementId familyId, bool flag, string[] namesList, double[] valuesList)
+        {
+            using (Transaction t = new Transaction(doc, "Select a family element"))
+            {
+                t.Start();
+                Family family = doc.GetElement(familyId) as Family;
+                FamilySymbol symb = null;
+
+                if (namesList.Length == 0)
+                {
+                    symb = doc.GetElement(family.GetFamilySymbolIds().First()) as FamilySymbol;
+                }
+                else
+                {
+                    symb = family.GetFamilySymbolIds()
+                        .Select(id => doc.GetElement(id) as FamilySymbol)
+                        .FirstOrDefault(sym => FamilyElementMatches(sym, namesList, valuesList));
+                    if (symb == null)
+                    {
+                        symb = doc.GetElement(family.GetFamilySymbolIds().First()) as FamilySymbol;
+                        string nName = "CustomFamily" + customFamilyCounter.ToString();
+                        customFamilyCounter++;
+                        symb = symb.Duplicate(nName) as FamilySymbol;
+                        for (int i = 0; i < namesList.Length; i++)
+                        {
+                            symb.get_Parameter(namesList[i]).Set(valuesList[i]);
+                        }
+                    }
+                }
+                t.Commit();
+                return symb.Id;
+            }
+        }
+
         public ElementId CreatePolygonalFloor(XYZ[] pts, ElementId levelId)
         {
             using (Transaction t = new Transaction(doc, "Creating a floor"))
@@ -130,7 +190,8 @@ namespace KhepriRevit
                 if (famId != null)
                 {
                     roofType = doc.GetElement(famId) as RoofType;
-                } else
+                }
+                else
                 {
                     var roofTypeList = new FilteredElementCollector(doc).OfClass(typeof(RoofType));
                     roofType = roofTypeList.First(e =>
@@ -153,7 +214,7 @@ namespace KhepriRevit
             }
         }
 
-        public ElementId CreateColumn(XYZ location, ElementId baseLevelId, ElementId topLevelId, ElementId famId, double width)
+        public ElementId CreateColumn(XYZ location, ElementId baseLevelId, ElementId topLevelId, ElementId famId)
         {
             using (Transaction t = new Transaction(doc, "Creating a column"))
             {
@@ -165,11 +226,6 @@ namespace KhepriRevit
                 FamilySymbol symbol = (famId == null) ?
                     GetFirstSymbol(FindColumnFamilies(doc).FirstOrDefault()) :
                     doc.GetElement(famId) as FamilySymbol;
-                if (width > 0)
-                {
-                    symbol.get_Parameter("Width").Set(width);
-                    symbol.get_Parameter("Depth").Set(width);
-                }
                 FamilyInstance col = doc.Create.NewFamilyInstance(location, symbol, level0, Autodesk.Revit.DB.Structure.StructuralType.Column);
                 col.get_Parameter(BuiltInParameter.FAMILY_TOP_LEVEL_PARAM).Set(level1.Id);
                 col.get_Parameter(BuiltInParameter.FAMILY_TOP_LEVEL_OFFSET_PARAM).Set(0.0);
