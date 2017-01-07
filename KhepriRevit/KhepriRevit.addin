@@ -1,0 +1,11 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Assembly>C:\Users\aml\Dropbox\AML\Projects\Khepri\KhepriRevit\KhepriRevit\bin\x64\Debug\KhepriRevit.dll</Assembly>
+    <AddInId>604b1052-f742-4951-8576-c261d1993108</AddInId>
+    <FullClassName>KhepriRevit.PlugIn</FullClassName>
+    <Name>Khepri</Name>
+    <VendorId>NAME</VendorId>
+    <VendorDescription>IST</VendorDescription>
+  </AddIn>
+</RevitAddIns>
