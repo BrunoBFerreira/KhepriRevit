@@ -122,7 +122,7 @@ namespace KhepriRevit
         public void eElement(Exception e) => eElementId(e);
 
         public Level rLevel() => rElement() as Level;
-        public void wLevel(Level e) => wLevel(e);
+        public void wLevel(Level e) => wElement(e);
         public void eLevel(Exception e) => eElement(e);
 
         /*
@@ -214,6 +214,13 @@ namespace KhepriRevit
             }
         }
         public void eDoubleArray(Exception e) { wInt32(-1); dumpException(e); }
+
+
+        static private Dictionary<int, Family> loadedFamilies = new Dictionary<int, Family>();
+        public Family rFamily() => loadedFamilies[rInt32()];
+        public void wFamily(Family f) { int i = f.Id.IntegerValue; loadedFamilies[i] = f; wInt32(i); }
+        public void eFamily(Exception e) => eElementId(e);
+
         /*        
                 public Document getDoc() => Application.DocumentManager.MdiActiveDocument;
                 public Transaction getTrans(Document doc) => doc.Database.TransactionManager.StartTransaction();
@@ -291,21 +298,35 @@ namespace KhepriRevit
         }
         public bool ExecuteOperation(int op)
         {
-            while (true)
+            using (Transaction t = new Transaction(doc, "Execute"))
             {
-                if (op == -1) return false;
-                operations[op](this, primitives);
-                flush();
-                stream.ReadTimeout = 10;
-                try
+                t.Start();
+                WarningSwallower.KhepriWarnings(t);
+                while (true)
                 {
-                    op = ReadOperation();
+                    if (op == -1)
+                    {
+                        t.Commit();
+                        return false;
+                    }
+                    operations[op](this, primitives);
+                    flush();
+                    stream.ReadTimeout = 20;
+                    try
+                    {
+                        op = ReadOperation();
+                    }
+                    catch (IOException)
+                    {
+                        break;
+                    }
+                    finally
+                    {
+                        stream.ReadTimeout = -1;
+                    }
                 }
-                catch (IOException)
-                {
-                    stream.ReadTimeout = -1;
-                    return true;
-                }
+                t.Commit();
+                return true;
             }
         }
     }

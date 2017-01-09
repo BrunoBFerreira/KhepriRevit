@@ -15,6 +15,9 @@ namespace KhepriRevit
         private Document doc;
         private int levelCounter = 3;
         private int customFamilyCounter = 0;
+        static private Dictionary<string, Family> fileNameToFamily = new Dictionary<string, Family>();
+        static private Dictionary<Family, Dictionary<string, FamilySymbol>> loadedFamiliesSymbols = 
+            new Dictionary<Family, Dictionary<string, FamilySymbol>>();
 
         public Primitives(UIApplication app)
         {
@@ -67,26 +70,21 @@ namespace KhepriRevit
         }
         public ElementId CreateLevelAtElevation(double elevation)
         {
-            using (Transaction t = new Transaction(doc, "Creating a level"))
-            {
-                t.Start();
-                Level level = doc.Create.NewLevel(elevation);
-                level.Name = "Level " + levelCounter;
-                levelCounter++;
-                IEnumerable<ViewFamilyType> viewFamilyTypes;
-                viewFamilyTypes = from elem in new FilteredElementCollector(doc).OfClass(typeof(ViewFamilyType))
-                                  let type = elem as ViewFamilyType
-                                  where type.ViewFamily == ViewFamily.FloorPlan
-                                  select type;
-                ViewPlan floorView = ViewPlan.Create(doc, viewFamilyTypes.First().Id, level.Id);
-                viewFamilyTypes = from elem in new FilteredElementCollector(doc).OfClass(typeof(ViewFamilyType))
-                                  let type = elem as ViewFamilyType
-                                  where type.ViewFamily == ViewFamily.CeilingPlan
-                                  select type;
-                ViewPlan ceilingView = ViewPlan.Create(doc, viewFamilyTypes.First().Id, level.Id);
-                t.Commit();
-                return level.Id;
-            }
+            Level level = doc.Create.NewLevel(elevation);
+            level.Name = "Level " + levelCounter;
+            levelCounter++;
+            IEnumerable<ViewFamilyType> viewFamilyTypes;
+            viewFamilyTypes = from elem in new FilteredElementCollector(doc).OfClass(typeof(ViewFamilyType))
+                              let type = elem as ViewFamilyType
+                              where type.ViewFamily == ViewFamily.FloorPlan
+                              select type;
+            ViewPlan floorView = ViewPlan.Create(doc, viewFamilyTypes.First().Id, level.Id);
+            viewFamilyTypes = from elem in new FilteredElementCollector(doc).OfClass(typeof(ViewFamilyType))
+                              let type = elem as ViewFamilyType
+                              where type.ViewFamily == ViewFamily.CeilingPlan
+                              select type;
+            ViewPlan ceilingView = ViewPlan.Create(doc, viewFamilyTypes.First().Id, level.Id);
+            return level.Id;
         }
         public ElementId FindOrCreateLevelAtElevation(double elevation)
         {
@@ -99,16 +97,15 @@ namespace KhepriRevit
             return FindOrCreateLevelAtElevation(level.Elevation + addedElevation);
         }
 
-        public ElementId LoadFamily(string fileName)
+        public Family LoadFamily(string fileName)
         {
-            using (Transaction t = new Transaction(doc, "Load a family"))
+            Family family;
+            if (!fileNameToFamily.TryGetValue(fileName, out family))
             {
-                t.Start();
-                Family family = null;
                 Debug.Assert(doc.LoadFamily(fileName, out family));
-                t.Commit();
-                return family.Id;
+                fileNameToFamily[fileName] = family;
             }
+            return family;
         }
 
         bool FamilyElementMatches(FamilySymbol symb, string[] namesList, double[] valuesList)
@@ -124,138 +121,109 @@ namespace KhepriRevit
             }
             return true;
         }
-        public ElementId FamilyElement(ElementId familyId, bool flag, string[] namesList, double[] valuesList)
+        public ElementId FamilyElement(Family family, string[] namesList, double[] valuesList)
         {
-            using (Transaction t = new Transaction(doc, "Select a family element"))
+            Dictionary<string, FamilySymbol> loadedFamilySymbols;
+            if (!loadedFamiliesSymbols.TryGetValue(family, out loadedFamilySymbols))
             {
-                t.Start();
-                Family family = doc.GetElement(familyId) as Family;
-                FamilySymbol symb = null;
-
-                if (namesList.Length == 0)
+                loadedFamilySymbols = new Dictionary<string, FamilySymbol>();
+                loadedFamiliesSymbols[family] = loadedFamilySymbols;
+            }
+            string parametersStr = "";
+            for (int i = 0; i < namesList.Length; i++)
+            {
+                parametersStr += namesList[i] + ":" + valuesList[i] + ",";
+            }
+            FamilySymbol familySymbol;
+            if (!loadedFamilySymbols.TryGetValue(parametersStr, out familySymbol))
+            {
+                familySymbol = family.GetFamilySymbolIds()
+                    .Select(id => doc.GetElement(id) as FamilySymbol)
+                    .FirstOrDefault(sym => FamilyElementMatches(sym, namesList, valuesList));
+                if (familySymbol == null)
                 {
-                    symb = doc.GetElement(family.GetFamilySymbolIds().First()) as FamilySymbol;
-                }
-                else
-                {
-                    symb = family.GetFamilySymbolIds()
-                        .Select(id => doc.GetElement(id) as FamilySymbol)
-                        .FirstOrDefault(sym => FamilyElementMatches(sym, namesList, valuesList));
-                    if (symb == null)
+                    familySymbol = doc.GetElement(family.GetFamilySymbolIds().First()) as FamilySymbol;
+                    string nName = "CustomFamily" + customFamilyCounter.ToString();
+                    customFamilyCounter++;
+                    familySymbol = familySymbol.Duplicate(nName) as FamilySymbol;
+                    for (int i = 0; i < namesList.Length; i++)
                     {
-                        symb = doc.GetElement(family.GetFamilySymbolIds().First()) as FamilySymbol;
-                        string nName = "CustomFamily" + customFamilyCounter.ToString();
-                        customFamilyCounter++;
-                        symb = symb.Duplicate(nName) as FamilySymbol;
-                        for (int i = 0; i < namesList.Length; i++)
-                        {
-                            symb.get_Parameter(namesList[i]).Set(valuesList[i]);
-                        }
+                        familySymbol.get_Parameter(namesList[i]).Set(valuesList[i]);
                     }
                 }
-                t.Commit();
-                return symb.Id;
+                loadedFamilySymbols[parametersStr] = familySymbol;
             }
+            return familySymbol.Id;
         }
-
         public ElementId CreatePolygonalFloor(XYZ[] pts, ElementId levelId)
         {
-            using (Transaction t = new Transaction(doc, "Creating a floor"))
+            Level level = doc.GetElement(levelId) as Level;
+            FloorType floorType = new FilteredElementCollector(doc).OfClass(typeof(FloorType)).First() as FloorType;
+            CurveArray profile = new CurveArray();
+            for (int i = 0; i < pts.Length; i++)
             {
-                t.Start();
-                WarningSwallower.KhepriWarnings(t);
-
-                Level level = doc.GetElement(levelId) as Level;
-                FloorType floorType = new FilteredElementCollector(doc).OfClass(typeof(FloorType)).First() as FloorType;
-                CurveArray profile = new CurveArray();
-                for (int i = 0; i < pts.Length; i++)
-                {
-                    profile.Append(Line.CreateBound(pts[i], pts[(i + 1) % pts.Length]));
-                }
-                Floor floor = doc.Create.NewFloor(profile, floorType, level, false);
-                floor.get_Parameter(BuiltInParameter.FLOOR_HEIGHTABOVELEVEL_PARAM).Set(0); //Below the level line
-                t.Commit();
-                return floor.Id;
+                profile.Append(Line.CreateBound(pts[i], pts[(i + 1) % pts.Length]));
             }
+            Floor floor = doc.Create.NewFloor(profile, floorType, level, false);
+            floor.get_Parameter(BuiltInParameter.FLOOR_HEIGHTABOVELEVEL_PARAM).Set(0); //Below the level line
+            return floor.Id;
         }
-
         public ElementId CreatePolygonalRoof(XYZ[] pts, ElementId levelId, ElementId famId)
         {
-            using (Transaction t = new Transaction(doc, "Creating a roof"))
+            Level level = doc.GetElement(levelId) as Level;
+            RoofType roofType = null;
+            if (famId != null)
             {
-                t.Start();
-                WarningSwallower.KhepriWarnings(t);
-                Level level = doc.GetElement(levelId) as Level;
-                RoofType roofType = null;
-                if (famId != null)
-                {
-                    roofType = doc.GetElement(famId) as RoofType;
-                }
-                else
-                {
-                    var roofTypeList = new FilteredElementCollector(doc).OfClass(typeof(RoofType));
-                    roofType = roofTypeList.First(e =>
-                        e.Name.Equals("Generic - 125mm") ||
-                        e.Name.Equals("Generic Roof - 300mm")) as RoofType;
-                    if (roofType == null)
-                    {
-                        roofType = roofTypeList.First() as RoofType;
-                    }
-                }
-                CurveArray profile = new CurveArray();
-                for (int i = 0; i < pts.Length; i++)
-                {
-                    profile.Append(Line.CreateBound(pts[i], pts[(i + 1) % pts.Length]));
-                }
-                ModelCurveArray curveArray = new ModelCurveArray();
-                FootPrintRoof roof = doc.Create.NewFootPrintRoof(profile, level, roofType, out curveArray);
-                t.Commit();
-                return roof.Id;
+                roofType = doc.GetElement(famId) as RoofType;
             }
+            else
+            {
+                var roofTypeList = new FilteredElementCollector(doc).OfClass(typeof(RoofType));
+                roofType = roofTypeList.First(e =>
+                    e.Name.Equals("Generic - 125mm") ||
+                    e.Name.Equals("Generic Roof - 300mm")) as RoofType;
+                if (roofType == null)
+                {
+                    roofType = roofTypeList.First() as RoofType;
+                }
+            }
+            CurveArray profile = new CurveArray();
+            for (int i = 0; i < pts.Length; i++)
+            {
+                profile.Append(Line.CreateBound(pts[i], pts[(i + 1) % pts.Length]));
+            }
+            ModelCurveArray curveArray = new ModelCurveArray();
+            FootPrintRoof roof = doc.Create.NewFootPrintRoof(profile, level, roofType, out curveArray);
+            return roof.Id;
         }
-
         public ElementId CreateColumn(XYZ location, ElementId baseLevelId, ElementId topLevelId, ElementId famId)
         {
-            using (Transaction t = new Transaction(doc, "Creating a column"))
-            {
-                t.Start();
-                WarningSwallower.KhepriWarnings(t);
-
-                Level level0 = doc.GetElement(baseLevelId) as Level;
-                Level level1 = doc.GetElement(topLevelId) as Level;
-                FamilySymbol symbol = (famId == null) ?
-                    GetFirstSymbol(FindColumnFamilies(doc).FirstOrDefault()) :
-                    doc.GetElement(famId) as FamilySymbol;
-                FamilyInstance col = doc.Create.NewFamilyInstance(location, symbol, level0, Autodesk.Revit.DB.Structure.StructuralType.Column);
-                col.get_Parameter(BuiltInParameter.FAMILY_TOP_LEVEL_PARAM).Set(level1.Id);
-                col.get_Parameter(BuiltInParameter.FAMILY_TOP_LEVEL_OFFSET_PARAM).Set(0.0);
-                col.get_Parameter(BuiltInParameter.FAMILY_BASE_LEVEL_OFFSET_PARAM).Set(0.0);
-                t.Commit();
-                return col.Id;
-            }
+            Level level0 = doc.GetElement(baseLevelId) as Level;
+            Level level1 = doc.GetElement(topLevelId) as Level;
+            FamilySymbol symbol = (famId == null) ?
+                GetFirstSymbol(FindColumnFamilies(doc).FirstOrDefault()) :
+                doc.GetElement(famId) as FamilySymbol;
+            FamilyInstance col = doc.Create.NewFamilyInstance(location, symbol, level0, Autodesk.Revit.DB.Structure.StructuralType.Column);
+            col.get_Parameter(BuiltInParameter.FAMILY_TOP_LEVEL_PARAM).Set(level1.Id);
+            col.get_Parameter(BuiltInParameter.FAMILY_TOP_LEVEL_OFFSET_PARAM).Set(0.0);
+            col.get_Parameter(BuiltInParameter.FAMILY_BASE_LEVEL_OFFSET_PARAM).Set(0.0);
+            return col.Id;
         }
-
         public ElementId CreateBeam(XYZ p0, XYZ p1, ElementId famId)
         {
-            using (Transaction t = new Transaction(doc, "Creating a beam"))
-            {
-                t.Start();
-                WarningSwallower.KhepriWarnings(t);
-                FamilySymbol beamSymb = null;
+            FamilySymbol beamSymb = null;
 
-                if (famId == null)
-                {
-                    Family defaultBeamFam = FindCategoryFamilies(doc, BuiltInCategory.OST_StructuralFraming).First();
-                    beamSymb = doc.GetElement(defaultBeamFam.GetFamilySymbolIds().First()) as FamilySymbol;
-                }
-                else
-                {
-                    beamSymb = doc.GetElement(famId) as FamilySymbol;
-                }
-                FamilyInstance beam = doc.Create.NewFamilyInstance(Line.CreateBound(p0, p1), beamSymb, null, Autodesk.Revit.DB.Structure.StructuralType.Beam);
-                t.Commit();
-                return beam.Id;
+            if (famId == null)
+            {
+                Family defaultBeamFam = FindCategoryFamilies(doc, BuiltInCategory.OST_StructuralFraming).First();
+                beamSymb = doc.GetElement(defaultBeamFam.GetFamilySymbolIds().First()) as FamilySymbol;
             }
+            else
+            {
+                beamSymb = doc.GetElement(famId) as FamilySymbol;
+            }
+            FamilyInstance beam = doc.Create.NewFamilyInstance(Line.CreateBound(p0, p1), beamSymb, null, Autodesk.Revit.DB.Structure.StructuralType.Beam);
+            return beam.Id;
         }
     }
 
