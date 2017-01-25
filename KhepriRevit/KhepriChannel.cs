@@ -107,25 +107,6 @@ namespace KhepriRevit
                     wVector3d(f.zaxis);
                 }
                 public void eFrame3d(Exception e) { ePoint3d(e); }
-*/
-        public ElementId rElementId()
-        {
-            int id = r.ReadInt32();
-            //Check this number. Should we use -1?
-            return (id == 0) ? null : new ElementId(id);
-        }
-        public void wElementId(ElementId id) => wInt32(id.IntegerValue);
-        public void eElementId(Exception e) { wInt32(-1); dumpException(e); }
-
-        public Element rElement() => doc.GetElement(rElementId());
-        public void wElement(Element e) { using (e) { wElementId(e.Id); } }
-        public void eElement(Exception e) => eElementId(e);
-
-        public Level rLevel() => rElement() as Level;
-        public void wLevel(Level e) => wElement(e);
-        public void eLevel(Exception e) => eElement(e);
-
-        /*
                         public Frame3d rFrame3d() => new Frame3d(rPoint3d(), rVector3d(), rVector3d(), rVector3d());
 
                         public void wDoubleArray(double[] ds)
@@ -137,7 +118,10 @@ namespace KhepriRevit
                             }
                         }
                         public void eDoubleArray(Exception e) { wInt32(-1); dumpException(e); }
-                */
+        */
+        public void eArray(Exception e) { wInt32(-1); dumpException(e); }
+
+
         public XYZ[] rXYZArray()
         {
             int length = rInt32();
@@ -156,7 +140,7 @@ namespace KhepriRevit
                 wXYZ(pt);
             }
         }
-        public void eXYZArray(Exception e) => wInt32(-1);
+        public void eXYZArray(Exception e) => eArray(e);
 
         public ElementId[] rElementIdArray()
         {
@@ -176,6 +160,7 @@ namespace KhepriRevit
                 wElementId(id);
             }
         }
+        public void eElementIdArray(Exception e) => eArray(e);
         public string[] rStringArray()
         {
             int length = rInt32();
@@ -194,7 +179,7 @@ namespace KhepriRevit
                 wString(str);
             }
         }
-        public void eStringArray(Exception e) { wInt32(-1); dumpException(e); }
+        public void eStringArray(Exception e) => eArray(e);
         public double[] rDoubleArray()
         {
             int length = rInt32();
@@ -213,8 +198,25 @@ namespace KhepriRevit
                 wDouble(d);
             }
         }
-        public void eDoubleArray(Exception e) { wInt32(-1); dumpException(e); }
+        public void eDoubleArray(Exception e) => eArray(e);
 
+
+        public ElementId rElementId()
+        {
+            int id = r.ReadInt32();
+            //Check this number. Should we use -1?
+            return (id == 0) ? null : new ElementId(id);
+        }
+        public void wElementId(ElementId id) => wInt32(id.IntegerValue);
+        public void eElementId(Exception e) { wInt32(-1); dumpException(e); }
+
+        public Element rElement() => doc.GetElement(rElementId());
+        public void wElement(Element e) { using (e) { wElementId(e.Id); } }
+        public void eElement(Exception e) => eElementId(e);
+
+        public Level rLevel() => rElement() as Level;
+        public void wLevel(Level e) => wElement(e);
+        public void eLevel(Exception e) => eElement(e);
 
         static private Dictionary<int, Family> loadedFamilies = new Dictionary<int, Family>();
         public Family rFamily() => loadedFamilies[rInt32()];
@@ -300,6 +302,7 @@ namespace KhepriRevit
         {
             using (Transaction t = new Transaction(doc, "Execute"))
             {
+                primitives.CurrentTransaction = t;
                 t.Start();
                 WarningSwallower.KhepriWarnings(t);
                 while (true)
